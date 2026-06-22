@@ -110,3 +110,59 @@ export interface AppError extends Error {
   statusCode: number;
   isOperational: boolean;
 }
+
+// ─── Auth & User Types ──────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  password?: string;
+  createdAt: string;
+}
+
+export interface KycSubmission {
+  userId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  documentType: 'national_id' | 'passport';
+  frontImage: string; // base64 string
+  backImage: string; // base64 string
+  selfieImage: string; // base64 string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  rejectionReason?: string;
+  submittedAt: string;
+  reviewedAt?: string;
+}
+
+export interface Trip {
+  id: string;
+  userId: string;
+  fullName: string;
+  fromCity: string;
+  toCity: string;
+  travelDate: string;
+  availableWeight: number;
+  pricePerKg: number;
+  description?: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  createdAt: string;
+}
+
+export interface Shipment {
+  id: string;
+  userId: string;
+  fullName: string;
+  title: string;
+  fromCity: string;
+  toCity: string;
+  deliveryDeadline: string;
+  weight: number;
+  pricePaid: number;
+  category: 'documents' | 'electronics' | 'clothing' | 'food' | 'other';
+  description: string;
+  status: 'PENDING' | 'MATCHED' | 'DELIVERED' | 'CANCELLED';
+  createdAt: string;
+}

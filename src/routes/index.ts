@@ -2,6 +2,9 @@ import { Router } from 'express';
 import healthRoutes from './health.routes';
 import landingRoutes from './landing.routes';
 import waitlistRoutes from './waitlist.routes';
+import authRoutes from './auth.routes';
+import kycRoutes from './kyc.routes';
+import dashboardRoutes from './dashboard.routes';
 import { getStats, getRoutes, getFeatures } from '../controllers/landing.controller';
 
 const router = Router();
@@ -19,5 +22,12 @@ router.get('/features', getFeatures);
 
 // ─── Waitlist ─────────────────────────────────────────────────────────────────
 router.use('/waitlist', waitlistRoutes);
+
+// ─── Auth & KYC ──────────────────────────────────────────────────────────────
+router.use('/auth', authRoutes);
+router.use('/kyc', kycRoutes);
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+router.use('/dashboard', dashboardRoutes);
 
 export default router;
