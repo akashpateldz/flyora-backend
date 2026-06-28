@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { usersTable, tripsTable, shipmentsTable } from '../services/db.service';
-import { Trip, Shipment } from '../types';
+import bcrypt from 'bcryptjs';
+import { query } from '../services/db.service';
 
 // Create a Traveler Trip
 export const createTrip = async (req: Request, res: Response): Promise<void> => {
@@ -15,36 +14,51 @@ export const createTrip = async (req: Request, res: Response): Promise<void> => 
     return;
   }
 
-  const user = usersTable.find(u => u.id === userId);
-  if (!user) {
-    res.status(404).json({
-      success: false,
-      message: 'User not found',
+  try {
+    // Check user
+    const userRes = await query('SELECT full_name FROM users WHERE id = $1', [userId]);
+    if (!userRes.rowCount || userRes.rowCount === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+
+    const userName = userRes.rows[0].full_name;
+
+    // Insert trip
+    const insertRes = await query(
+      `INSERT INTO trips (user_id, from_city, to_city, travel_date, available_weight, price_per_kg, notes, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ACTIVE')
+       RETURNING id, user_id as "userId", from_city as "fromCity", to_city as "toCity", travel_date as "travelDate", available_weight as "availableWeight", price_per_kg as "pricePerKg", notes as "description", status, created_at as "createdAt"`,
+      [
+        userId,
+        fromCity.trim(),
+        toCity.trim(),
+        travelDate,
+        Number(availableWeight),
+        Number(pricePerKg),
+        description ? description.trim() : null
+      ]
+    );
+
+    const trip = insertRes.rows[0];
+    // Attach fullName matching original contract
+    trip.fullName = userName;
+
+    res.status(201).json({
+      success: true,
+      message: 'Trip registered successfully',
+      data: trip,
     });
-    return;
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error creating trip',
+      error: error.message,
+    });
   }
-
-  const newTrip: Trip = {
-    id: uuidv4(),
-    userId,
-    fullName: user.fullName,
-    fromCity: fromCity.trim(),
-    toCity: toCity.trim(),
-    travelDate,
-    availableWeight: Number(availableWeight),
-    pricePerKg: Number(pricePerKg),
-    description: description ? description.trim() : undefined,
-    status: 'ACTIVE',
-    createdAt: new Date().toISOString(),
-  };
-
-  tripsTable.push(newTrip);
-
-  res.status(201).json({
-    success: true,
-    message: 'Trip registered successfully',
-    data: newTrip,
-  });
 };
 
 // Get all trips for a traveler
@@ -59,16 +73,39 @@ export const getUserTrips = async (req: Request, res: Response): Promise<void> =
     return;
   }
 
-  const trips = tripsTable.filter(t => t.userId === userId);
-  
-  // Sort by date descending
-  trips.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  try {
+    const tripsRes = await query(
+      `SELECT
+         t.id,
+         t.user_id as "userId",
+         u.full_name as "fullName",
+         t.from_city as "fromCity",
+         t.to_city as "toCity",
+         t.travel_date as "travelDate",
+         t.available_weight as "availableWeight",
+         t.price_per_kg as "pricePerKg",
+         t.notes as "description",
+         t.status,
+         t.created_at as "createdAt"
+       FROM trips t
+       JOIN users u ON t.user_id = u.id
+       WHERE t.user_id = $1
+       ORDER BY t.created_at DESC`,
+      [userId]
+    );
 
-  res.status(200).json({
-    success: true,
-    message: 'User trips retrieved successfully',
-    data: trips,
-  });
+    res.status(200).json({
+      success: true,
+      message: 'User trips retrieved successfully',
+      data: tripsRes.rows,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error retrieving user trips',
+      error: error.message,
+    });
+  }
 };
 
 // Create a Shipment Request
@@ -83,38 +120,52 @@ export const createShipment = async (req: Request, res: Response): Promise<void>
     return;
   }
 
-  const user = usersTable.find(u => u.id === userId);
-  if (!user) {
-    res.status(404).json({
-      success: false,
-      message: 'User not found',
+  try {
+    // Check user
+    const userRes = await query('SELECT full_name FROM users WHERE id = $1', [userId]);
+    if (!userRes.rowCount || userRes.rowCount === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+
+    const userName = userRes.rows[0].full_name;
+
+    // Insert shipment
+    const insertRes = await query(
+      `INSERT INTO shipments (user_id, title, from_city, to_city, delivery_deadline, weight, price_paid, category, description, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING')
+       RETURNING id, user_id as "userId", title, from_city as "fromCity", to_city as "toCity", delivery_deadline as "deliveryDeadline", weight, price_paid as "pricePaid", category, description, status, created_at as "createdAt"`,
+      [
+        userId,
+        title.trim(),
+        fromCity.trim(),
+        toCity.trim(),
+        deliveryDeadline,
+        Number(weight),
+        Number(pricePaid),
+        category,
+        description.trim()
+      ]
+    );
+
+    const shipment = insertRes.rows[0];
+    shipment.fullName = userName;
+
+    res.status(201).json({
+      success: true,
+      message: 'Shipment request created successfully',
+      data: shipment,
     });
-    return;
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error creating shipment',
+      error: error.message,
+    });
   }
-
-  const newShipment: Shipment = {
-    id: uuidv4(),
-    userId,
-    fullName: user.fullName,
-    title: title.trim(),
-    fromCity: fromCity.trim(),
-    toCity: toCity.trim(),
-    deliveryDeadline,
-    weight: Number(weight),
-    pricePaid: Number(pricePaid),
-    category,
-    description: description.trim(),
-    status: 'PENDING',
-    createdAt: new Date().toISOString(),
-  };
-
-  shipmentsTable.push(newShipment);
-
-  res.status(201).json({
-    success: true,
-    message: 'Shipment request created successfully',
-    data: newShipment,
-  });
 };
 
 // Get shipments for a sender
@@ -129,16 +180,41 @@ export const getUserShipments = async (req: Request, res: Response): Promise<voi
     return;
   }
 
-  const shipments = shipmentsTable.filter(s => s.userId === userId);
-  
-  // Sort by date descending
-  shipments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  try {
+    const shipmentsRes = await query(
+      `SELECT
+         s.id,
+         s.user_id as "userId",
+         u.full_name as "fullName",
+         s.title,
+         s.from_city as "fromCity",
+         s.to_city as "toCity",
+         s.delivery_deadline as "deliveryDeadline",
+         s.weight,
+         s.price_paid as "pricePaid",
+         s.category,
+         s.description,
+         s.status,
+         s.created_at as "createdAt"
+       FROM shipments s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.user_id = $1
+       ORDER BY s.created_at DESC`,
+      [userId]
+    );
 
-  res.status(200).json({
-    success: true,
-    message: 'User shipments retrieved successfully',
-    data: shipments,
-  });
+    res.status(200).json({
+      success: true,
+      message: 'User shipments retrieved successfully',
+      data: shipmentsRes.rows,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error retrieving user shipments',
+      error: error.message,
+    });
+  }
 };
 
 // Get Dashboard Overview (Stats, Wallet simulated data, Smart Matches)
@@ -153,83 +229,162 @@ export const getDashboardOverview = async (req: Request, res: Response): Promise
     return;
   }
 
-  const user = usersTable.find(u => u.id === userId);
-  if (!user) {
-    res.status(404).json({
-      success: false,
-      message: 'User not found',
-    });
-    return;
-  }
-
-  // Active records counts
-  const activeTrips = tripsTable.filter(t => t.userId === userId && t.status === 'ACTIVE');
-  const activeShipments = shipmentsTable.filter(s => s.userId === userId && s.status === 'PENDING');
-
-  // Dynamic matching:
-  // 1. Matches for this user's active trips: find pending shipments by other users between same cities
-  const travelMatches: any[] = [];
-  activeTrips.forEach(trip => {
-    const matchingShipments = shipmentsTable.filter(ship => 
-      ship.userId !== userId &&
-      ship.status === 'PENDING' &&
-      ship.fromCity.toLowerCase().trim() === trip.fromCity.toLowerCase().trim() &&
-      ship.toCity.toLowerCase().trim() === trip.toCity.toLowerCase().trim()
-    );
-    
-    matchingShipments.forEach(ship => {
-      travelMatches.push({
-        tripId: trip.id,
-        tripDetails: `${trip.fromCity} ➔ ${trip.toCity} (${new Date(trip.travelDate).toLocaleDateString()})`,
-        matchType: 'shipment_match',
-        shipment: ship
+  try {
+    // Check user
+    const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (!userRes.rowCount || userRes.rowCount === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
       });
-    });
-  });
-
-  // 2. Matches for this user's pending shipments: find active trips by other users between same cities
-  const shipmentMatches: any[] = [];
-  activeShipments.forEach(shipment => {
-    const matchingTrips = tripsTable.filter(trip => 
-      trip.userId !== userId &&
-      trip.status === 'ACTIVE' &&
-      trip.fromCity.toLowerCase().trim() === shipment.fromCity.toLowerCase().trim() &&
-      trip.toCity.toLowerCase().trim() === shipment.toCity.toLowerCase().trim()
-    );
-
-    matchingTrips.forEach(trip => {
-      shipmentMatches.push({
-        shipmentId: shipment.id,
-        shipmentDetails: `${shipment.title} (${shipment.weight}kg)`,
-        matchType: 'traveler_match',
-        trip: trip
-      });
-    });
-  });
-
-  // Simulated Escrow & Wallet data
-  // Base balance of $380.00
-  // Escrow balance: sum of active shipments pricePaid.
-  const walletBalance = 380.00;
-  const escrowBalance = activeShipments.reduce((sum, s) => sum + s.pricePaid, 0);
-
-  res.status(200).json({
-    success: true,
-    message: 'Dashboard overview data loaded',
-    data: {
-      stats: {
-        activeTripsCount: activeTrips.length,
-        activeShipmentsCount: activeShipments.length,
-        walletBalance,
-        escrowBalance,
-      },
-      matches: {
-        travelMatches,
-        shipmentMatches,
-        totalMatchesCount: travelMatches.length + shipmentMatches.length
-      }
+      return;
     }
-  });
+
+    // Active counts
+    const activeTripsRes = await query(
+      "SELECT COUNT(*) as count FROM trips WHERE user_id = $1 AND status = 'ACTIVE'",
+      [userId]
+    );
+    const activeTripsCount = parseInt(activeTripsRes.rows[0].count, 10);
+
+    const activeShipmentsRes = await query(
+      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status = 'PENDING'",
+      [userId]
+    );
+    const activeShipmentsCount = parseInt(activeShipmentsRes.rows[0].count, 10);
+
+    // Escrow balance
+    const escrowRes = await query(
+      "SELECT COALESCE(SUM(price_paid), 0) as balance FROM shipments WHERE user_id = $1 AND status = 'PENDING'",
+      [userId]
+    );
+    const escrowBalance = parseFloat(escrowRes.rows[0].balance);
+
+    // Matches logic:
+    // 1. Matches for this user's active trips: find pending shipments by other users between same cities
+    const travelMatchesRes = await query(
+      `SELECT
+         t.id as "tripId",
+         CONCAT(t.from_city, ' ➔ ', t.to_city, ' (', TO_CHAR(t.travel_date, 'YYYY-MM-DD'), ')') as "tripDetails",
+         'shipment_match' as "matchType",
+         s.id,
+         s.user_id as "userId",
+         u.full_name as "fullName",
+         s.title,
+         s.from_city as "fromCity",
+         s.to_city as "toCity",
+         s.delivery_deadline as "deliveryDeadline",
+         s.weight,
+         s.price_paid as "pricePaid",
+         s.category,
+         s.description,
+         s.status,
+         s.created_at as "createdAt"
+       FROM trips t
+       JOIN shipments s ON s.user_id <> $1
+         AND s.status = 'PENDING'
+         AND LOWER(TRIM(s.from_city)) = LOWER(TRIM(t.from_city))
+         AND LOWER(TRIM(s.to_city)) = LOWER(TRIM(t.to_city))
+       JOIN users u ON s.user_id = u.id
+       WHERE t.user_id = $1 AND t.status = 'ACTIVE'`,
+      [userId]
+    );
+
+    // Re-format rows to nest shipment info like original code
+    const travelMatches = travelMatchesRes.rows.map(row => ({
+      tripId: row.tripId,
+      tripDetails: row.tripDetails,
+      matchType: row.matchType,
+      shipment: {
+        id: row.id,
+        userId: row.userId,
+        fullName: row.fullName,
+        title: row.title,
+        fromCity: row.fromCity,
+        toCity: row.toCity,
+        deliveryDeadline: row.deliveryDeadline,
+        weight: parseFloat(row.weight),
+        pricePaid: parseFloat(row.pricePaid),
+        category: row.category,
+        description: row.description,
+        status: row.status,
+        createdAt: row.createdAt
+      }
+    }));
+
+    // 2. Matches for this user's pending shipments: find active trips by other users between same cities
+    const shipmentMatchesRes = await query(
+      `SELECT
+         s.id as "shipmentId",
+         CONCAT(s.title, ' (', s.weight, 'kg)') as "shipmentDetails",
+         'traveler_match' as "matchType",
+         t.id,
+         t.user_id as "userId",
+         u.full_name as "fullName",
+         t.from_city as "fromCity",
+         t.to_city as "toCity",
+         t.travel_date as "travelDate",
+         t.available_weight as "availableWeight",
+         t.price_per_kg as "pricePerKg",
+         t.notes as "description",
+         t.status,
+         t.created_at as "createdAt"
+       FROM shipments s
+       JOIN trips t ON t.user_id <> $1
+         AND t.status = 'ACTIVE'
+         AND LOWER(TRIM(t.from_city)) = LOWER(TRIM(s.from_city))
+         AND LOWER(TRIM(t.to_city)) = LOWER(TRIM(s.to_city))
+       JOIN users u ON t.user_id = u.id
+       WHERE s.user_id = $1 AND s.status = 'PENDING'`,
+      [userId]
+    );
+
+    // Re-format rows to nest trip info like original code
+    const shipmentMatches = shipmentMatchesRes.rows.map(row => ({
+      shipmentId: row.shipmentId,
+      shipmentDetails: row.shipmentDetails,
+      matchType: row.matchType,
+      trip: {
+        id: row.id,
+        userId: row.userId,
+        fullName: row.fullName,
+        fromCity: row.fromCity,
+        toCity: row.toCity,
+        travelDate: row.travelDate,
+        availableWeight: parseFloat(row.availableWeight),
+        pricePerKg: parseFloat(row.pricePerKg),
+        description: row.description,
+        status: row.status,
+        createdAt: row.createdAt
+      }
+    }));
+
+    const walletBalance = 380.00;
+
+    res.status(200).json({
+      success: true,
+      message: 'Dashboard overview data loaded',
+      data: {
+        stats: {
+          activeTripsCount,
+          activeShipmentsCount,
+          walletBalance,
+          escrowBalance,
+        },
+        matches: {
+          travelMatches,
+          shipmentMatches,
+          totalMatchesCount: travelMatches.length + shipmentMatches.length
+        }
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error loading dashboard overview',
+      error: error.message,
+    });
+  }
 };
 
 // Update User Profile
@@ -245,55 +400,322 @@ export const updateUserProfile = async (req: Request, res: Response): Promise<vo
     return;
   }
 
-  const user = usersTable.find(u => u.id === userId);
-  if (!user) {
-    res.status(404).json({
-      success: false,
-      message: 'User not found',
-    });
-    return;
-  }
-
-  // If email is being changed, check uniqueness
-  if (email && email.toLowerCase().trim() !== user.email) {
-    const emailTaken = usersTable.some(u => u.id !== userId && u.email === email.toLowerCase().trim());
-    if (emailTaken) {
-      res.status(400).json({
+  try {
+    const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (!userRes.rowCount || userRes.rowCount === 0) {
+      res.status(404).json({
         success: false,
-        message: 'This email address is already taken by another user',
+        message: 'User not found',
       });
       return;
     }
-    user.email = email.toLowerCase().trim();
-  }
 
-  if (fullName) {
-    user.fullName = fullName.trim();
-    // Cascade update name in creator fields
-    tripsTable.forEach(t => {
-      if (t.userId === userId) t.fullName = user.fullName;
-    });
-    shipmentsTable.forEach(s => {
-      if (s.userId === userId) s.fullName = user.fullName;
-    });
-  }
-
-  if (phone) {
-    user.phone = phone.trim();
-  }
-
-  if (password) {
-    user.password = password;
-  }
-
-  res.status(200).json({
-    success: true,
-    message: 'Profile updated successfully',
-    data: {
-      userId: user.id,
-      fullName: user.fullName,
-      email: user.email,
-      phone: user.phone,
+    // Email check
+    if (email) {
+      const emailTaken = await query('SELECT id FROM users WHERE email = $1 AND id <> $2', [email.toLowerCase().trim(), userId]);
+      if (emailTaken.rowCount && emailTaken.rowCount > 0) {
+        res.status(400).json({
+          success: false,
+          message: 'This email address is already taken by another user',
+        });
+        return;
+      }
     }
-  });
+
+    // Build update parameters dynamically
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (fullName) {
+      updates.push(`full_name = $${paramIndex++}`);
+      values.push(fullName.trim());
+    }
+
+    if (email) {
+      updates.push(`email = $${paramIndex++}`);
+      values.push(email.toLowerCase().trim());
+    }
+
+    if (phone) {
+      updates.push(`phone = $${paramIndex++}`);
+      values.push(phone.trim());
+    }
+
+    if (password) {
+      const salt = await bcrypt.genSalt(12);
+      const hash = await bcrypt.hash(password, salt);
+      updates.push(`password_hash = $${paramIndex++}`);
+      values.push(hash);
+    }
+
+    if (updates.length > 0) {
+      values.push(userId);
+      await query(
+        `UPDATE users
+         SET ${updates.join(', ')}
+         WHERE id = $${paramIndex}`,
+        values
+      );
+    }
+
+    // Fetch updated user to return
+    const updatedUserRes = await query(
+      'SELECT id, full_name, email, phone FROM users WHERE id = $1',
+      [userId]
+    );
+
+    const user = updatedUserRes.rows[0];
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: {
+        userId: user.id,
+        fullName: user.full_name,
+        email: user.email,
+        phone: user.phone,
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error updating user profile',
+      error: error.message,
+    });
+  }
+};
+
+// Update Trip
+export const updateTrip = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { fromCity, toCity, travelDate, availableWeight, pricePerKg, description, status } = req.body;
+
+  try {
+    const tripRes = await query('SELECT id FROM trips WHERE id = $1', [id]);
+    if (!tripRes.rowCount || tripRes.rowCount === 0) {
+      res.status(404).json({ success: false, message: 'Trip not found' });
+      return;
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (fromCity) {
+      updates.push(`from_city = $${paramIndex++}`);
+      values.push(fromCity.trim());
+    }
+    if (toCity) {
+      updates.push(`to_city = $${paramIndex++}`);
+      values.push(toCity.trim());
+    }
+    if (travelDate) {
+      updates.push(`travel_date = $${paramIndex++}`);
+      values.push(travelDate);
+    }
+    if (availableWeight !== undefined) {
+      updates.push(`available_weight = $${paramIndex++}`);
+      values.push(Number(availableWeight));
+    }
+    if (pricePerKg !== undefined) {
+      updates.push(`price_per_kg = $${paramIndex++}`);
+      values.push(Number(pricePerKg));
+    }
+    if (description !== undefined) {
+      updates.push(`notes = $${paramIndex++}`);
+      values.push(description.trim());
+    }
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      values.push(status);
+    }
+
+    if (updates.length > 0) {
+      values.push(id);
+      await query(
+        `UPDATE trips
+         SET ${updates.join(', ')}
+         WHERE id = $${paramIndex}`,
+        values
+      );
+    }
+
+    const updatedRes = await query(
+      `SELECT
+         t.id,
+         t.user_id as "userId",
+         u.full_name as "fullName",
+         t.from_city as "fromCity",
+         t.to_city as "toCity",
+         t.travel_date as "travelDate",
+         t.available_weight as "availableWeight",
+         t.price_per_kg as "pricePerKg",
+         t.notes as "description",
+         t.status,
+         t.created_at as "createdAt"
+       FROM trips t
+       JOIN users u ON t.user_id = u.id
+       WHERE t.id = $1`,
+      [id]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Trip updated successfully',
+      data: updatedRes.rows[0]
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error updating trip',
+      error: error.message,
+    });
+  }
+};
+
+// Delete Trip
+export const deleteTrip = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const tripRes = await query('DELETE FROM trips WHERE id = $1', [id]);
+    if (tripRes.rowCount === 0) {
+      res.status(404).json({ success: false, message: 'Trip not found' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Trip deleted successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error deleting trip',
+      error: error.message,
+    });
+  }
+};
+
+// Update Shipment
+export const updateShipment = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { title, fromCity, toCity, deliveryDeadline, weight, pricePaid, category, description, status } = req.body;
+
+  try {
+    const shipmentRes = await query('SELECT id FROM shipments WHERE id = $1', [id]);
+    if (!shipmentRes.rowCount || shipmentRes.rowCount === 0) {
+      res.status(404).json({ success: false, message: 'Shipment not found' });
+      return;
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (title) {
+      updates.push(`title = $${paramIndex++}`);
+      values.push(title.trim());
+    }
+    if (fromCity) {
+      updates.push(`from_city = $${paramIndex++}`);
+      values.push(fromCity.trim());
+    }
+    if (toCity) {
+      updates.push(`to_city = $${paramIndex++}`);
+      values.push(toCity.trim());
+    }
+    if (deliveryDeadline) {
+      updates.push(`delivery_deadline = $${paramIndex++}`);
+      values.push(deliveryDeadline);
+    }
+    if (weight !== undefined) {
+      updates.push(`weight = $${paramIndex++}`);
+      values.push(Number(weight));
+    }
+    if (pricePaid !== undefined) {
+      updates.push(`price_paid = $${paramIndex++}`);
+      values.push(Number(pricePaid));
+    }
+    if (category) {
+      updates.push(`category = $${paramIndex++}`);
+      values.push(category);
+    }
+    if (description !== undefined) {
+      updates.push(`description = $${paramIndex++}`);
+      values.push(description.trim());
+    }
+    if (status) {
+      updates.push(`status = $${paramIndex++}`);
+      values.push(status);
+    }
+
+    if (updates.length > 0) {
+      values.push(id);
+      await query(
+        `UPDATE shipments
+         SET ${updates.join(', ')}
+         WHERE id = $${paramIndex}`,
+        values
+      );
+    }
+
+    const updatedRes = await query(
+      `SELECT
+         s.id,
+         s.user_id as "userId",
+         u.full_name as "fullName",
+         s.title,
+         s.from_city as "fromCity",
+         s.to_city as "toCity",
+         s.delivery_deadline as "deliveryDeadline",
+         s.weight,
+         s.price_paid as "pricePaid",
+         s.category,
+         s.description,
+         s.status,
+         s.created_at as "createdAt"
+       FROM shipments s
+       JOIN users u ON s.user_id = u.id
+       WHERE s.id = $1`,
+      [id]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Shipment updated successfully',
+      data: updatedRes.rows[0]
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error updating shipment',
+      error: error.message,
+    });
+  }
+};
+
+// Delete Shipment
+export const deleteShipment = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.params;
+
+  try {
+    const shipmentRes = await query('DELETE FROM shipments WHERE id = $1', [id]);
+    if (shipmentRes.rowCount === 0) {
+      res.status(404).json({ success: false, message: 'Shipment not found' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Shipment deleted successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error deleting shipment',
+      error: error.message,
+    });
+  }
 };

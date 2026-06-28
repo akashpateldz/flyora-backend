@@ -1,6 +1,14 @@
-import { User, KycSubmission, Trip, Shipment } from '../types';
+import { Pool, QueryResult } from 'pg';
+import { env } from '../config/env';
 
-export const usersTable: User[] = [];
-export const kycTable: KycSubmission[] = [];
-export const tripsTable: Trip[] = [];
-export const shipmentsTable: Shipment[] = [];
+export const pool = new Pool({
+  user: env.dbUser,
+  password: env.dbPassword,
+  host: env.dbHost,
+  port: env.dbPort,
+  database: env.dbDatabase,
+});
+
+export const query = (text: string, params?: any[]): Promise<QueryResult> => {
+  return pool.query(text, params);
+};

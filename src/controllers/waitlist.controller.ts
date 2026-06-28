@@ -59,8 +59,8 @@ export const joinWaitlist = async (req: Request, res: Response): Promise<void> =
   res.status(201).json(response);
 };
 
-export const getWaitlistCount = (_req: Request, res: Response): void => {
-  const count = waitlistService.getCount();
+export const getWaitlistCount = async (_req: Request, res: Response): Promise<void> => {
+  const count = await waitlistService.getCount();
   res.status(200).json({
     success: true,
     message: 'Waitlist count retrieved',

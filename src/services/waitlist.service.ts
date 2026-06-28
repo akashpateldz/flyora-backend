@@ -1,25 +1,28 @@
-import { v4 as uuidv4 } from 'uuid';
-import { WaitlistEntry, WaitlistRequest, WaitlistResponse } from '../types';
+import { query } from './db.service';
+import { WaitlistRequest, WaitlistResponse } from '../types';
 import { env } from '../config/env';
-
-// ─── In-memory store (replace with DB in production) ─────────────────────────
-
-const waitlist: WaitlistEntry[] = [];
-
-// ─── Service ──────────────────────────────────────────────────────────────────
 
 export class WaitlistService {
   async addToWaitlist(
     data: WaitlistRequest,
     ipAddress?: string
   ): Promise<WaitlistResponse> {
+    const email = data.email.toLowerCase().trim();
+
     // Check for duplicate email
-    const existing = waitlist.find(
-      (entry) => entry.email.toLowerCase() === data.email.toLowerCase()
+    const existingRes = await query(
+      'SELECT id, email FROM waitlist WHERE email = $1',
+      [email]
     );
 
-    if (existing) {
-      const position = waitlist.indexOf(existing) + 1;
+    if (existingRes.rowCount && existingRes.rowCount > 0) {
+      const existing = existingRes.rows[0];
+      const positionRes = await query(
+        'SELECT COUNT(*) as position FROM waitlist WHERE created_at <= (SELECT created_at FROM waitlist WHERE email = $1)',
+        [email]
+      );
+      const position = parseInt(positionRes.rows[0].position, 10);
+
       return {
         id: existing.id,
         email: existing.email,
@@ -29,38 +32,53 @@ export class WaitlistService {
     }
 
     // Check capacity
-    if (waitlist.length >= env.waitlistMaxEntries) {
+    const countRes = await query('SELECT COUNT(*) as count FROM waitlist');
+    const currentCount = parseInt(countRes.rows[0].count, 10);
+    if (currentCount >= env.waitlistMaxEntries) {
       throw new Error('Waitlist is currently full. Please try again later.');
     }
 
-    const entry: WaitlistEntry = {
-      id: uuidv4(),
-      email: data.email.toLowerCase().trim(),
-      name: data.name?.trim(),
-      role: data.role || 'both',
-      createdAt: new Date().toISOString(),
-      ipAddress,
-    };
+    // Insert new entry
+    const insertRes = await query(
+      `INSERT INTO waitlist (email, name, role, ip_address)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, email`,
+      [
+        email,
+        data.name?.trim() || null,
+        data.role || 'both',
+        ipAddress || null,
+      ]
+    );
 
-    waitlist.push(entry);
-    const position = waitlist.length;
+    const newEntry = insertRes.rows[0];
+
+    // Find position
+    const positionRes = await query(
+      'SELECT COUNT(*) as position FROM waitlist WHERE created_at <= (SELECT created_at FROM waitlist WHERE email = $1)',
+      [email]
+    );
+    const position = parseInt(positionRes.rows[0].position, 10);
 
     return {
-      id: entry.id,
-      email: entry.email,
+      id: newEntry.id,
+      email: newEntry.email,
       position,
       message: `You've joined the Flyora waitlist at position #${position}! We'll notify you when we launch.`,
     };
   }
 
-  getCount(): number {
-    return waitlist.length;
+  async getCount(): Promise<number> {
+    const countRes = await query('SELECT COUNT(*) as count FROM waitlist');
+    return parseInt(countRes.rows[0].count, 10);
   }
 
-  isEmailRegistered(email: string): boolean {
-    return waitlist.some(
-      (entry) => entry.email.toLowerCase() === email.toLowerCase()
+  async isEmailRegistered(email: string): Promise<boolean> {
+    const res = await query(
+      'SELECT 1 FROM waitlist WHERE email = $1',
+      [email.toLowerCase().trim()]
     );
+    return (res.rowCount !== null && res.rowCount > 0);
   }
 }
 
