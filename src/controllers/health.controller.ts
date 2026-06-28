@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { HealthStatus, ApiResponse } from '../types';
+import { ApiResponse } from '../types';
 import { env } from '../config/env';
 import { query } from '../services/db.service';
 
