@@ -47,6 +47,13 @@ export const createTrip = async (req: Request, res: Response): Promise<void> => 
     // Attach fullName matching original contract
     trip.fullName = userName;
 
+    // Insert notification
+    await query(
+      `INSERT INTO notifications (user_id, title, message, type)
+       VALUES ($1, 'Travel Capacity Registered', $2, 'system')`,
+      [userId, `Your capacity of ${availableWeight} kg from ${fromCity.trim()} to ${toCity.trim()} on ${travelDate} has been registered.`]
+    );
+
     res.status(201).json({
       success: true,
       message: 'Trip registered successfully',
@@ -154,6 +161,26 @@ export const createShipment = async (req: Request, res: Response): Promise<void>
     const shipment = insertRes.rows[0];
     shipment.fullName = userName;
 
+    // Deduct wallet balance
+    await query(
+      'UPDATE users SET wallet_balance = wallet_balance - $1 WHERE id = $2',
+      [Number(pricePaid), userId]
+    );
+
+    // Insert wallet transaction
+    await query(
+      `INSERT INTO wallet_transactions (user_id, amount, type, description)
+       VALUES ($1, $2, 'debit', $3)`,
+      [userId, Number(pricePaid), `Escrow locked: ${title.trim()} (${fromCity.trim()} ➔ ${toCity.trim()})`]
+    );
+
+    // Insert notification
+    await query(
+      `INSERT INTO notifications (user_id, title, message, type)
+       VALUES ($1, 'Parcel Shipment Created', $2, 'system')`,
+      [userId, `Your shipment request for "${title.trim()}" to be sent from ${fromCity.trim()} to ${toCity.trim()} has been published.`]
+    );
+
     res.status(201).json({
       success: true,
       message: 'Shipment request created successfully',
@@ -248,10 +275,69 @@ export const getDashboardOverview = async (req: Request, res: Response): Promise
     const activeTripsCount = parseInt(activeTripsRes.rows[0].count, 10);
 
     const activeShipmentsRes = await query(
-      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status = 'PENDING'",
+      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status IN ('PENDING', 'MATCHED')",
       [userId]
     );
     const activeShipmentsCount = parseInt(activeShipmentsRes.rows[0].count, 10);
+
+    // Total Shipments Count
+    const totalShipmentsRes = await query(
+      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1",
+      [userId]
+    );
+    const totalShipmentsCount = parseInt(totalShipmentsRes.rows[0].count, 10);
+
+    // Total Trips Count
+    const totalTripsRes = await query(
+      "SELECT COUNT(*) as count FROM trips WHERE user_id = $1",
+      [userId]
+    );
+    const totalTripsCount = parseInt(totalTripsRes.rows[0].count, 10);
+
+    // Completed Shipments Count
+    const completedShipmentsRes = await query(
+      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status = 'DELIVERED'",
+      [userId]
+    );
+    const completedShipmentsCount = parseInt(completedShipmentsRes.rows[0].count, 10);
+
+    // Total Spend on shipments
+    const totalSpendRes = await query(
+      "SELECT COALESCE(SUM(price_paid), 0) as spend FROM shipments WHERE user_id = $1 AND status <> 'CANCELLED'",
+      [userId]
+    );
+    const totalSpend = parseFloat(totalSpendRes.rows[0].spend);
+
+    // Status-wise counts for pipeline overview
+    const pendingCountRes = await query(
+      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status = 'PENDING'",
+      [userId]
+    );
+    const pendingCount = parseInt(pendingCountRes.rows[0].count, 10);
+
+    const inTransitCountRes = await query(
+      `SELECT COUNT(*) as count 
+       FROM bookings b
+       JOIN shipments s ON b.shipment_id = s.id
+       WHERE s.user_id = $1 AND b.status IN ('ACCEPTED', 'PAID')`,
+      [userId]
+    );
+    const inTransitCount = parseInt(inTransitCountRes.rows[0].count, 10);
+
+    const outForDeliveryCountRes = await query(
+      `SELECT COUNT(*) as count 
+       FROM bookings b
+       JOIN shipments s ON b.shipment_id = s.id
+       WHERE s.user_id = $1 AND b.status = 'IN_TRANSIT'`,
+      [userId]
+    );
+    const outForDeliveryCount = parseInt(outForDeliveryCountRes.rows[0].count, 10);
+
+    const deliveredCountRes = await query(
+      "SELECT COUNT(*) as count FROM shipments WHERE user_id = $1 AND status = 'DELIVERED'",
+      [userId]
+    );
+    const deliveredCount = parseInt(deliveredCountRes.rows[0].count, 10);
 
     // Escrow balance
     const escrowRes = await query(
@@ -358,8 +444,26 @@ export const getDashboardOverview = async (req: Request, res: Response): Promise
         createdAt: row.createdAt
       }
     }));
+    // Fetch live wallet balance directly from database users table
+    const walletRes = await query("SELECT wallet_balance as balance FROM users WHERE id = $1", [userId]);
+    const walletBalance = parseFloat(walletRes.rows[0].balance);
 
-    const walletBalance = 380.00;
+    // Query live transactions from database
+    const transactionsRes = await query(
+      `SELECT id, amount, type, description, created_at as "date"
+       FROM wallet_transactions
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [userId]
+    );
+    const transactions = transactionsRes.rows.map(row => ({
+      id: row.id,
+      amount: parseFloat(row.amount),
+      type: row.type,
+      description: row.description,
+      date: row.date.toISOString().split('T')[0]
+    }));
 
     res.status(200).json({
       success: true,
@@ -368,14 +472,23 @@ export const getDashboardOverview = async (req: Request, res: Response): Promise
         stats: {
           activeTripsCount,
           activeShipmentsCount,
+          totalShipmentsCount,
+          totalTripsCount,
+          completedShipmentsCount,
+          totalSpend,
           walletBalance,
           escrowBalance,
+          pendingCount,
+          inTransitCount,
+          outForDeliveryCount,
+          deliveredCount,
         },
         matches: {
           travelMatches,
           shipmentMatches,
           totalMatchesCount: travelMatches.length + shipmentMatches.length
-        }
+        },
+        transactions
       }
     });
   } catch (error: any) {
@@ -390,7 +503,7 @@ export const getDashboardOverview = async (req: Request, res: Response): Promise
 // Update User Profile
 export const updateUserProfile = async (req: Request, res: Response): Promise<void> => {
   const { userId } = req.params;
-  const { fullName, email, phone, password } = req.body;
+  const { fullName, email, phone, password, profileImageUrl } = req.body;
 
   if (!userId) {
     res.status(400).json({
@@ -449,6 +562,11 @@ export const updateUserProfile = async (req: Request, res: Response): Promise<vo
       values.push(hash);
     }
 
+    if (profileImageUrl !== undefined) {
+      updates.push(`profile_image_url = $${paramIndex++}`);
+      values.push(profileImageUrl);
+    }
+
     if (updates.length > 0) {
       values.push(userId);
       await query(
@@ -461,7 +579,7 @@ export const updateUserProfile = async (req: Request, res: Response): Promise<vo
 
     // Fetch updated user to return
     const updatedUserRes = await query(
-      'SELECT id, full_name, email, phone FROM users WHERE id = $1',
+      'SELECT id, full_name as "fullName", email, phone, profile_image_url as "profileImageUrl" FROM users WHERE id = $1',
       [userId]
     );
 
@@ -719,3 +837,136 @@ export const deleteShipment = async (req: Request, res: Response): Promise<void>
     });
   }
 };
+
+// Top up user wallet
+export const topupWallet = async (req: Request, res: Response): Promise<void> => {
+  const { userId, amount, description } = req.body;
+
+  if (!userId || !amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+    res.status(400).json({
+      success: false,
+      message: 'userId and a valid positive amount are required',
+    });
+    return;
+  }
+
+  try {
+    // Check if user exists
+    const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (!userRes.rowCount || userRes.rowCount === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+
+    const numericAmount = Number(amount);
+    const desc = description ? description.trim() : 'Direct Wallet Payout Top-up';
+
+    // 1. Update wallet balance
+    await query(
+      'UPDATE users SET wallet_balance = wallet_balance + $1 WHERE id = $2',
+      [numericAmount, userId]
+    );
+
+    // 2. Insert wallet transaction
+    await query(
+      'INSERT INTO wallet_transactions (user_id, amount, type, description) VALUES ($1, $2, $3, $4)',
+      [userId, numericAmount, 'credit', desc]
+    );
+
+    // Fetch updated balance
+    const updatedUser = await query('SELECT wallet_balance FROM users WHERE id = $1', [userId]);
+    const walletBalance = parseFloat(updatedUser.rows[0].wallet_balance);
+
+    // Insert notification
+    await query(
+      `INSERT INTO notifications (user_id, title, message, type)
+       VALUES ($1, 'Wallet Top-up Success', $2, 'wallet')`,
+      [userId, `Successfully topped up $${numericAmount.toFixed(2)} to your wallet balance.`]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Wallet topped up successfully',
+      data: {
+        walletBalance
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error topping up wallet',
+      error: error.message,
+    });
+  }
+};
+
+// Get user notifications
+export const getUserNotifications = async (req: Request, res: Response): Promise<void> => {
+  const { userId } = req.params;
+
+  if (!userId) {
+    res.status(400).json({ success: false, message: 'userId is required' });
+    return;
+  }
+
+  try {
+    const listRes = await query(
+      `SELECT id, title, message, type, is_read as "isRead", created_at as "createdAt"
+       FROM notifications
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [userId]
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Notifications retrieved successfully',
+      data: listRes.rows
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error retrieving notifications',
+      error: error.message
+    });
+  }
+};
+
+// Mark notification as read
+export const markNotificationRead = async (req: Request, res: Response): Promise<void> => {
+  const { notificationId } = req.body;
+
+  if (!notificationId) {
+    res.status(400).json({ success: false, message: 'notificationId is required' });
+    return;
+  }
+
+  try {
+    const updateRes = await query(
+      'UPDATE notifications SET is_read = TRUE WHERE id = $1',
+      [notificationId]
+    );
+
+    if (updateRes.rowCount === 0) {
+      res.status(404).json({ success: false, message: 'Notification not found' });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Notification marked as read successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error marking notification as read',
+      error: error.message
+    });
+  }
+};
+
+

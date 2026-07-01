@@ -24,9 +24,9 @@ const createApp = (): Application => {
       // Allow requests with no origin (mobile apps, curl, etc.)
       if (!origin) return callback(null, true);
 
-      const isAllowed = env.allowedOrigins.includes(origin) || 
-                        origin.endsWith('.vercel.app') || 
-                        /^https?:\/\/localhost:\d+$/.test(origin);
+      const isAllowed = env.allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        /^https?:\/\/localhost:\d+$/.test(origin);
 
       if (isAllowed) {
         callback(null, true);

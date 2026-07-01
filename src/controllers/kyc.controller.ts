@@ -83,6 +83,21 @@ export const getKycStatus = async (req: Request, res: Response): Promise<void> =
   }
 
   try {
+    const userRes = await query(
+      'SELECT email, phone, full_name as "fullName", profile_image_url as "profileImageUrl" FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (!userRes.rowCount || userRes.rowCount === 0) {
+      res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+
+    const user = userRes.rows[0];
+
     const resubmission = await query(
       'SELECT status, rejection_reason FROM kyc_submissions WHERE user_id = $1',
       [userId]
@@ -92,18 +107,29 @@ export const getKycStatus = async (req: Request, res: Response): Promise<void> =
       res.status(200).json({
         success: true,
         message: 'No KYC submission found',
-        data: { status: 'NOT_SUBMITTED' },
+        data: {
+          status: 'NOT_SUBMITTED',
+          email: user.email,
+          phone: user.phone,
+          fullName: user.fullName,
+          profileImageUrl: user.profileImageUrl
+        },
       });
       return;
     }
 
     const sub = resubmission.rows[0];
+
     res.status(200).json({
       success: true,
       message: 'KYC status retrieved successfully',
       data: {
         status: sub.status,
         rejectionReason: sub.rejection_reason || undefined,
+        email: user.email,
+        phone: user.phone,
+        fullName: user.fullName,
+        profileImageUrl: user.profileImageUrl
       },
     });
   } catch (error: any) {

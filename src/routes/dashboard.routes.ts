@@ -9,7 +9,10 @@ import {
   updateShipment,
   deleteShipment,
   getDashboardOverview,
-  updateUserProfile
+  updateUserProfile,
+  topupWallet,
+  getUserNotifications,
+  markNotificationRead
 } from '../controllers/dashboard.controller';
 
 const router = Router();
@@ -26,5 +29,8 @@ router.delete('/shipments/:id', deleteShipment);
 
 router.get('/overview/:userId', getDashboardOverview);
 router.put('/profile/:userId', updateUserProfile);
+router.post('/wallet/topup', topupWallet);
+router.get('/notifications/:userId', getUserNotifications);
+router.post('/notifications/mark-read', markNotificationRead);
 
 export default router;
