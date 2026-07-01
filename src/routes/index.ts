@@ -5,6 +5,7 @@ import waitlistRoutes from './waitlist.routes';
 import authRoutes from './auth.routes';
 import kycRoutes from './kyc.routes';
 import dashboardRoutes from './dashboard.routes';
+import adminRoutes from './admin.routes';
 import { getStats, getRoutes, getFeatures } from '../controllers/landing.controller';
 
 const router = Router();
@@ -27,7 +28,8 @@ router.use('/waitlist', waitlistRoutes);
 router.use('/auth', authRoutes);
 router.use('/kyc', kycRoutes);
 
-// ─── Dashboard ───────────────────────────────────────────────────────────────
+// ─── Dashboard & Admin ───────────────────────────────────────────────────────
 router.use('/dashboard', dashboardRoutes);
+router.use('/admin', adminRoutes);
 
 export default router;

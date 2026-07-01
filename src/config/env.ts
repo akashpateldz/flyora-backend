@@ -11,6 +11,7 @@ export const env = {
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
   apiVersion: process.env.API_VERSION || 'v1',
   waitlistMaxEntries: parseInt(process.env.WAITLIST_MAX_ENTRIES || '10000', 10),
+  databaseUrl: process.env.DATABASE_URL,
   dbUser: process.env.DB_USER || 'postgres',
   dbPassword: process.env.DB_PASSWORD || '@k@sh001PA',
   dbHost: process.env.DB_HOST || 'localhost',

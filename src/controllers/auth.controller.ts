@@ -54,6 +54,7 @@ export const signup = async (req: Request, res: Response): Promise<void> => {
       },
     });
   } catch (error: any) {
+    console.error('[AUTH_ERROR] Error during registration:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error during registration',
@@ -78,7 +79,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     // Fetch user
     const userRes = await query(
-      'SELECT id, full_name, email, password_hash FROM users WHERE email = $1 AND is_active = TRUE',
+      'SELECT id, full_name, email, role, password_hash FROM users WHERE email = $1 AND is_active = TRUE',
       [trimmedEmail]
     );
 
@@ -115,9 +116,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
         userId: user.id,
         fullName: user.full_name,
         email: user.email,
+        role: user.role,
       },
     });
   } catch (error: any) {
+    console.error('[AUTH_ERROR] Error during login:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error during login',
